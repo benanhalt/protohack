@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::Read;
 use std::io::Write;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::str;
 use std::thread;
 
@@ -23,10 +23,10 @@ fn main() {
 
     match &args[1][..] {
         "smoke_test" => {
-            smoke_test();
+            server(smoke_test);
         }
         "prime_time" => {
-            prime_time();
+            server(prime_time);
         }
         other => {
             dbg!(other);
@@ -34,90 +34,86 @@ fn main() {
     }
 }
 
-fn smoke_test() {
+fn server(handler: fn(TcpStream)) {
     let listener = TcpListener::bind("127.0.0.1:8888").unwrap();
     println!("listening on 8888");
     for stream in listener.incoming() {
-        thread::spawn(|| {
-            println!("accepted connection");
-            let mut stream = stream.unwrap();
-            let mut buf: [u8; 1024] = [0; 1024];
-            loop {
-                match stream.read(&mut buf) {
-                    Ok(0) => {
-                        break;
-                    }
-                    Ok(n) => {
-                        println!("read data");
-                        stream.write(&buf[0..n]).expect("write failed");
-                    }
-                    _ => panic!("argh"),
-                }
-            }
-            println!("closing")
+        let stream = stream.unwrap();
+        thread::spawn(move || {
+            handler(stream);
         });
     }
 }
 
-fn prime_time() {
-    let listener = TcpListener::bind("127.0.0.1:8888").unwrap();
-    println!("listening on 8888");
-    for stream in listener.incoming() {
-        thread::spawn(|| {
-            println!("accepted connection");
-            let mut stream = stream.unwrap();
-            let mut buf: [u8; 1024] = [0; 1024];
-            let mut request_str = Vec::new();
-            loop {
-                match stream.read(&mut buf) {
-                    Ok(0) => {
-                        break;
-                    }
-                    Ok(n) => {
-                        println!("read data");
-                        request_str.extend_from_slice(&buf[0..n]);
-                        if buf[0..n].contains(&b'\n') {
-                            let parts: Vec<&[u8]> = request_str.split(|&c| c == b'\n').collect();
-                            let (&last, reqs) = parts.split_last().unwrap();
-                            for req in reqs {
-                                let resp =
-                                    if let Ok(request) = serde_json::from_slice::<Request>(req) {
-                                        dbg!(&request);
-                                        if request.method != "isPrime" {
-                                            Response {
-                                                method: "malformed".to_string(),
-                                                prime: false,
-                                            }
-                                        } else {
-                                            Response {
-                                                method: "isPrime".to_string(),
-                                                prime: is_prime(request.number),
-                                            }
-                                        }
-                                    } else {
-                                        Response {
-                                            method: "malformed".to_string(),
-                                            prime: false,
-                                        }
-                                    };
+fn smoke_test(mut stream: TcpStream) {
+    println!("accepted connection");
+    let mut buf: [u8; 1024] = [0; 1024];
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                break;
+            }
+            Ok(n) => {
+                println!("read data");
+                stream.write(&buf[0..n]).expect("write failed");
+            }
+            _ => panic!("argh"),
+        }
+    }
+    println!("closing")
+}
 
-                                stream
-                                    .write_all(&serde_json::to_vec(&resp).unwrap())
-                                    .unwrap();
-                                stream.write_all(b"\n").unwrap();
-                                if resp.method == "malformed" {
-                                    return;
+fn prime_time(mut stream: TcpStream) {
+    println!("accepted connection");
+    let mut buf: [u8; 1024] = [0; 1024];
+    let mut request_str = Vec::new();
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => {
+                break;
+            }
+            Ok(n) => {
+                println!("read data");
+                request_str.extend_from_slice(&buf[0..n]);
+                if buf[0..n].contains(&b'\n') {
+                    let parts: Vec<&[u8]> = request_str.split(|&c| c == b'\n').collect();
+                    let (&last, reqs) = parts.split_last().unwrap();
+                    for req in reqs {
+                        let resp = if let Ok(request) = serde_json::from_slice::<Request>(req) {
+                            dbg!(&request);
+                            if request.method != "isPrime" {
+                                Response {
+                                    method: "malformed".to_string(),
+                                    prime: false,
+                                }
+                            } else {
+                                Response {
+                                    method: "isPrime".to_string(),
+                                    prime: is_prime(request.number),
                                 }
                             }
-                            request_str = last.to_vec();
+                        } else {
+                            Response {
+                                method: "malformed".to_string(),
+                                prime: false,
+                            }
+                        };
+
+                        stream
+                            .write_all(&serde_json::to_vec(&resp).unwrap())
+                            .unwrap();
+                        stream.write_all(b"\n").unwrap();
+                        if resp.method == "malformed" {
+                            return;
                         }
                     }
-                    _ => panic!("argh"),
+                    request_str = last.to_vec();
                 }
             }
-            println!("closing")
-        });
+            _ => panic!("argh"),
+        }
     }
+    println!("closing")
 }
 
 fn is_prime(number: f64) -> bool {
