@@ -2,6 +2,7 @@ use std::env;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
+mod budget_chat;
 mod means_ends;
 mod prime_time;
 mod smoke_test;
@@ -18,6 +19,9 @@ fn main() {
         }
         "means_ends" => {
             server(means_ends::means_ends);
+        }
+        "budget_chat" => {
+            budget_chat::main();
         }
         other => {
             dbg!(other);

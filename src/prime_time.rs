@@ -26,7 +26,7 @@ pub fn prime_time(mut stream: TcpStream) {
                 break;
             }
             Ok(_) => {
-                dbg!(str::from_utf8(&buf));
+                dbg!(str::from_utf8(&buf).unwrap());
                 let resp = if let Ok(request) = serde_json::from_slice::<Request>(&buf) {
                     dbg!(&request);
                     if request.method != "isPrime" {
